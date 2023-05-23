@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { useEffect, useState } from 'react';
 import ReactMarkdown from 'markdown-to-jsx';
 import Typography from '@mui/material/Typography';
 import Link from '@mui/material/Link';
@@ -46,5 +47,13 @@ const options = {
 };
 
 export default function Markdown(props) {
-  return <ReactMarkdown options={options} {...props} />;
+  const [content, setContent] = useState("")
+  const { children } = props
+  useEffect(() => {
+    fetch(children)
+      .then((res) => res.text())
+      .then((text) => setContent(text))
+  })
+
+  return <ReactMarkdown options={options} children={content}/>;
 }
