@@ -4,6 +4,10 @@ The reaper of your GitHub estate — finds and clears the cruft (stale branches,
 artifacts, stale draft releases). Named for Odin's wolf: the pack's hunter, and its most dangerous
 member.
 
+<p align="center">
+  <img src="docs/freki-reap.png" alt="freki reap — a dry-run summary of the estate's reapable cruft" width="700">
+</p>
+
 In Norse myth Odin keeps two ravens, **Huginn** (*thought*) and **Muninn** (*memory*), and two wolves,
 **Geri** and **Freki** (both meaning roughly "the ravenous one"). The ravens
 ([`huginn`](https://github.com/brett-buskirk/huginn), [`muninn`](https://github.com/brett-buskirk/muninn))
