@@ -35,11 +35,10 @@ These rules are non-negotiable, and they're enforced in code, not just documenta
 
 ## Status
 
-**v0.4.0 — all five commands are live.** The dispatcher, config, estate model, exemptions, and the
-shared dry-run/`--apply`/confirm safety spine are in place, and freki reaps merged/stale branches,
-abandoned PRs, old CI artifacts, and stale draft/pre-releases across the whole estate — plus `reap`,
-a combined dry-run-only summary across all four. What's left is polish: `shellcheck` in CI and the
-`v1.0.0` release. See [ROADMAP.md](ROADMAP.md) for what's left.
+**v1.0.0 — released.** All five commands (`branches`, `prs`, `artifacts`, `releases`, `reap`) work
+against the live estate, dry-run by default, respecting exemptions and every safety rail; `--apply`
+deletes only what was listed. Config-driven with two-level help, `shellcheck`-clean in CI, and passes
+`huginn doctor freki` clean. GitHub-only for now — see [ROADMAP.md](ROADMAP.md) for what's deferred.
 
 ## Install
 

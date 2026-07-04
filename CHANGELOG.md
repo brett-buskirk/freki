@@ -6,6 +6,19 @@ All notable changes to freki are documented here. The format is based on
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-07-04
+
+First stable release. No functional changes since 0.5.0 — this marks the estate's reaper as done
+against its original v0.1.0–v0.4.0 build plan and ready to rely on.
+
+- All five commands (`branches`, `prs`, `artifacts`, `releases`, `reap`) work against the live
+  estate, dry-run by default, respecting exemptions and every safety rail; `--apply` deletes only
+  what was listed.
+- Config-driven with two-level help; `shellcheck`-clean in CI; docs suite complete.
+- Verified against the real `~/github-repos` estate throughout development (every reaping command's
+  dry-run scan, and `branches --apply` on an isolated throwaway estate).
+- Passes `huginn doctor freki` clean.
+
 ## [0.5.0] - 2026-07-04
 
 ### Added
