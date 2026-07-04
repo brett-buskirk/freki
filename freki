@@ -69,8 +69,6 @@ do_it(){  # $1=repo $2=kind $3=description $4..=the actual delete command
   else printf "  ${R}✗ failed${X} %s\n" "$desc"; return 1; fi
 }
 
-not_yet(){ printf "\n  ${BD}freki %s${X}\n\n  ${DIM}not built yet — landing in %s. see ROADMAP.md for the phased plan.${X}\n\n" "$1" "$2"; }
-
 # ── branches (merged / stale — estate-wide) ───────────────────────────────
 cmd_branches(){
   is_help "${1:-}" && { help_branches; return 0; }
@@ -132,6 +130,7 @@ cmd_branches(){
   done < <(repos)
 
   local n=${#CAND[@]}
+  REAP_BR_N=$n; REAP_BR_REPOS=$repos_flagged
   if [ "$n" -eq 0 ]; then printf "  ${G}✓ no merged or stale branches anywhere${X}\n\n"; return 0; fi
 
   if [ "$APPLY" != 1 ]; then
@@ -193,6 +192,7 @@ cmd_prs(){
     fi
   done < <(printf '%s\n' "$rows")
 
+  REAP_PR_N=$n; REAP_PR_STALE=$stale
   if [ "$n" -eq 0 ]; then printf "  ${G}✓ nothing open${X}\n\n"; return 0; fi
 
   if [ "$APPLY" != 1 ]; then
@@ -255,6 +255,7 @@ cmd_artifacts(){
     done < <(printf '%s\n' "$rows")
   done < <(repos)
 
+  REAP_ART_N=$n; REAP_ART_BYTES=$total_bytes; REAP_ART_STALE=$stale; REAP_ART_STALE_BYTES=$stale_bytes
   if [ "$n" -eq 0 ]; then printf "  ${G}✓ no artifacts anywhere${X}\n\n"; return 0; fi
 
   if [ "$APPLY" != 1 ]; then
@@ -280,11 +281,97 @@ cmd_artifacts(){
   printf "\n  ${BD}%d deleted${X}%s\n\n" "$deleted" "$([ "$failed" -gt 0 ] && printf "  ${DIM}·${X} ${R}%d failed${X}" "$failed")"
 }
 
-# ── releases (stale draft / pre-releases) — v0.4.0 ────────────────────────
-cmd_releases(){ is_help "${1:-}" && { help_releases; return 0; }; not_yet releases v0.4.0; }
+# ── releases (stale draft / pre-releases) ─────────────────────────────────
+cmd_releases(){
+  is_help "${1:-}" && { help_releases; return 0; }
+  need_deps || return 1
+  need_owner || return 1
+  APPLY=0; YES=0
+  for a in "$@"; do case "$a" in
+    --apply) APPLY=1;; --yes|-y) YES=1;;
+    -*) printf "  ${Y}ignoring unknown option: %s${X}\n" "$a";;
+  esac; done
 
-# ── reap (the combined cruft summary) — v0.4.0 ────────────────────────────
-cmd_reap(){ is_help "${1:-}" && { help_reap; return 0; }; not_yet reap v0.4.0; }
+  printf "\n  ${BD}freki releases${X}  ${DIM}· stale draft / pre-releases (age ≥ %sd)${X}\n\n" "$STALE_DAYS"
+
+  local -a CAND=()  # repo \x1f release_id \x1f description
+  local now; now=$(date +%s)
+  local n=0 stale=0
+
+  while read -r d; do
+    is_exempt "$d" && continue
+    local rows; rows=$(gh api "repos/$OWNER/$d/releases" --paginate --jq \
+      '.[] | select(.draft==true or .prerelease==true) | [(.id|tostring),.tag_name,(.draft|tostring),.created_at,(.published_at // "")] | @tsv' 2>/dev/null)
+    [ -z "$rows" ] && continue
+    local printed=0
+    while IFS=$'\t' read -r id tag draft created published; do
+      [ -z "$id" ] && continue
+      n=$((n+1))
+      local kind; [ "$draft" = "true" ] && kind="draft" || kind="prerelease"
+      local refdate="${published:-$created}"; [ -z "$refdate" ] && refdate="$created"
+      local ts age; ts=$(date -d "$refdate" +%s 2>/dev/null); age=$(( (now - ${ts:-$now}) / 86400 ))
+      [ "$printed" = 0 ] && { printf "  ${BD}%s${X}\n" "$d"; printed=1; }
+      if [ "$age" -ge "$STALE_DAYS" ]; then
+        printf "    ${DIM}∙${X} %s ${Y}(%s, %sd old)${X}\n" "$tag" "$kind" "$age"
+        CAND+=("$d"$'\x1f'"$id"$'\x1f'"$d release '$tag' ($kind, ${age}d old)"); stale=$((stale+1))
+      else
+        printf "    ${DIM}∙${X} %s ${DIM}(%s, %sd old)${X}\n" "$tag" "$kind" "$age"
+      fi
+    done < <(printf '%s\n' "$rows")
+  done < <(repos)
+
+  REAP_REL_N=$n; REAP_REL_STALE=$stale
+
+  if [ "$n" -eq 0 ]; then printf "  ${G}✓ no draft or pre-releases anywhere${X}\n\n"; return 0; fi
+
+  if [ "$APPLY" != 1 ]; then
+    printf "\n  ${BD}%d draft/pre-release(s)${X} ${DIM}·${X} ${Y}%d past %sd${X} ${DIM}· 'freki releases --apply' deletes those${X}\n\n" "$n" "$stale" "$STALE_DAYS"
+    return 0
+  fi
+
+  local m=${#CAND[@]}
+  if [ "$m" -eq 0 ]; then printf "\n  ${G}✓ nothing past the threshold${X}\n\n"; return 0; fi
+
+  printf "\n"
+  if ! confirm "delete $m draft/pre-release(s)?"; then printf "  ${DIM}aborted — nothing deleted.${X}\n\n"; return 0; fi
+  YES=1
+
+  local deleted=0 failed=0 c
+  for c in "${CAND[@]}"; do
+    local repo id desc
+    IFS=$'\x1f' read -r repo id desc <<< "$c"
+    do_it "$repo" "release" "$desc" gh api -X DELETE "repos/$OWNER/$repo/releases/$id" \
+      && deleted=$((deleted+1)) || failed=$((failed+1))
+  done
+  printf "\n  ${BD}%d deleted${X}%s\n\n" "$deleted" "$([ "$failed" -gt 0 ] && printf "  ${DIM}·${X} ${R}%d failed${X}" "$failed")"
+}
+
+# ── reap (the combined cruft summary) ─────────────────────────────────────
+cmd_reap(){
+  is_help "${1:-}" && { help_reap; return 0; }
+  need_deps || return 1
+  need_owner || return 1
+  printf "\n  ${BD}freki reap${X}  ${DIM}· estate cruft summary · %s${X}\n\n" "$ROOT"
+
+  REAP_BR_N=0; REAP_BR_REPOS=0; REAP_PR_N=0; REAP_PR_STALE=0
+  REAP_ART_N=0; REAP_ART_BYTES=0; REAP_ART_STALE=0; REAP_ART_STALE_BYTES=0
+  REAP_REL_N=0; REAP_REL_STALE=0
+
+  cmd_branches  >/dev/null
+  cmd_prs       >/dev/null
+  cmd_artifacts >/dev/null
+  cmd_releases  >/dev/null
+
+  printf "  ${BD}branches${X}    %d reapable ${DIM}across %d repo(s)${X}\n" "$REAP_BR_N" "$REAP_BR_REPOS"
+  printf "  ${BD}prs${X}         %d abandoned ${DIM}(of %d open)${X}\n" "$REAP_PR_STALE" "$REAP_PR_N"
+  printf "  ${BD}artifacts${X}   %d reapable ${DIM}(%s, of %d total)${X}\n" "$REAP_ART_STALE" "$(human_size "$REAP_ART_STALE_BYTES")" "$REAP_ART_N"
+  printf "  ${BD}releases${X}    %d reapable ${DIM}(of %d draft/pre)${X}\n" "$REAP_REL_STALE" "$REAP_REL_N"
+
+  local total=$((REAP_BR_N + REAP_PR_STALE + REAP_ART_STALE + REAP_REL_STALE))
+  if [ "$total" -eq 0 ]; then printf "\n  ${G}✓ nothing to reap anywhere${X}\n\n"; return 0; fi
+  printf "\n  ${BD}%d thing(s) reapable${X} ${DIM}across the estate — apply per-command:${X}\n" "$total"
+  printf "  ${DIM}freki branches|prs|artifacts|releases --apply${X}\n\n"
+}
 
 # ── per-command help ──────────────────────────────────────────────────────
 help_branches(){
@@ -326,15 +413,20 @@ help_artifacts(){
 }
 help_releases(){
   printf "\n  ${BD}freki releases${X} [--apply] [--yes]\n\n"
-  printf "  Stale draft releases and old pre-releases. Lists them; ${BD}--apply${X} deletes.\n"
-  printf "  ${BD}Never${X} a published release or its tag.\n\n"
-  printf "  ${DIM}not built yet — landing in v0.4.0.${X}\n\n"
+  printf "  Stale draft releases and old pre-releases, age ≥ \$FREKI_STALE_DAYS ${DIM}(default: %s\n" "$STALE_DAYS"
+  printf "  days)${X}. Lists them; ${BD}--apply${X} deletes the release ${DIM}(the underlying git tag, if any,\n"
+  printf "  is left alone)${X}. ${BD}Never${X} a published (non-draft, non-prerelease) release or its tag.\n"
+  printf "  Excludes exempt repos (\$HUGINN_FAMILY + exemptions.json).\n\n"
+  printf "  ${BD}Options${X}\n"
+  printf "    --apply   delete the drafts/pre-releases past the threshold (confirms once for the batch)\n"
+  printf "    --yes     skip the confirmation prompt\n\n"
 }
 help_reap(){
   printf "\n  ${BD}freki reap${X}\n\n"
   printf "  The combined \"here's all the cruft\" summary across branches/prs/artifacts/releases,\n"
-  printf "  with an estate headline. Dry-run only — apply per-command.\n\n"
-  printf "  ${DIM}not built yet — landing in v0.4.0.${X}\n\n"
+  printf "  with an estate headline. ${BD}Dry-run only${X} — reap never deletes anything itself;\n"
+  printf "  apply per-command (${BD}freki branches|prs|artifacts|releases --apply${X}).\n\n"
+  printf "  ${DIM}Network — runs the full scan for all four commands, so it's the slowest one.${X}\n\n"
 }
 
 # ── help ──────────────────────────────────────────────────────────────────
@@ -344,8 +436,8 @@ cmd_help(){
   printf "    ${BD}branches${X} [--apply]    merged/stale branches, estate-wide\n"
   printf "    ${BD}prs${X} [--apply]         abandoned open PRs\n"
   printf "    ${BD}artifacts${X} [--apply]   old CI workflow artifacts\n"
-  printf "    ${BD}releases${X} [--apply]    stale draft / pre-releases         ${DIM}(v0.4.0)${X}\n"
-  printf "    ${BD}reap${X}                  the combined cruft summary         ${DIM}(v0.4.0)${X}\n"
+  printf "    ${BD}releases${X} [--apply]    stale draft / pre-releases\n"
+  printf "    ${BD}reap${X}                  the combined cruft summary (dry-run only)\n"
   printf "  ${DIM}reference${X}\n"
   printf "    ${BD}help${X}                  this menu\n\n"
   printf "  ${DIM}dry-run by default — every command needs${X} ${BD}--apply${X} ${DIM}to actually delete anything.${X}\n"
