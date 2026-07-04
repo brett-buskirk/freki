@@ -6,6 +6,17 @@ All notable changes to freki are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-04
+
+### Added
+- **`prs`** — every open PR across the estate via a single `gh search prs --owner` query, flagging
+  ones with no activity in `$FREKI_PR_STALE_DAYS` (default 180 days). `--apply` closes the abandoned
+  ones with a courteous comment (`gh pr close --comment`), confirming once for the batch.
+- **`artifacts`** — non-expired GitHub Actions workflow artifacts per repo, by age/size.
+  `--apply` deletes those at or past `$FREKI_STALE_DAYS` (default 90 days). Already-expired artifacts
+  are skipped — GitHub reclaims those on its own regardless of what freki does.
+- Both route through the same batch-confirm/`do_it`/`log_action` safety spine as `branches`.
+
 ## [0.2.0] - 2026-07-04
 
 ### Added

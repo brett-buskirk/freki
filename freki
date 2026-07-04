@@ -31,6 +31,7 @@ is_help(){ case "${1:-}" in help|-h|--help) return 0;; *) return 1;; esac; }
 repos(){ (cd "$ROOT" && for d in */; do [ -d "${d}.git" ] && echo "${d%/}"; done | sort); }
 need_owner(){ [ -n "$OWNER" ] && return 0; OWNER="$(gh api user --jq .login 2>/dev/null)"; [ -n "$OWNER" ] && return 0; printf "  ${R}no GitHub owner set.${X} Set FREKI_OWNER (or HUGINN_OWNER), or add it to %s.\n" "$CONFIG" >&2; return 1; }
 first_of(){ local f; for f in "$@"; do [ -e "$f" ] && { printf '%s' "$f"; return 0; }; done; return 1; }  # your conventions repo, else bundled templates
+human_size(){ local b="$1"; if [ "$b" -ge 1073741824 ]; then printf '%dGB' $((b/1073741824)); elif [ "$b" -ge 1048576 ]; then printf '%dMB' $((b/1048576)); else printf '%dKB' $((b/1024)); fi; }
 need_deps(){ local d; local -a miss=(); for d in git gh jq; do command -v "$d" >/dev/null 2>&1 || miss+=("$d"); done; [ ${#miss[@]} -eq 0 ] && return 0; printf "  ${R}missing required tool(s): %s${X} ${DIM}(freki needs bash, git, gh, jq)${X}\n" "${miss[*]}" >&2; return 1; }
 
 # exempt repos from the conventions data (merged with HUGINN_FAMILY by is_exempt)
@@ -159,11 +160,125 @@ cmd_branches(){
   printf "\n  ${BD}%d deleted${X}%s\n\n" "$deleted" "$([ "$failed" -gt 0 ] && printf "  ${DIM}·${X} ${R}%d failed${X}" "$failed")"
 }
 
-# ── prs (abandoned open PRs) — v0.3.0 ─────────────────────────────────────
-cmd_prs(){ is_help "${1:-}" && { help_prs; return 0; }; not_yet prs v0.3.0; }
+# ── prs (abandoned open PRs) ───────────────────────────────────────────────
+cmd_prs(){
+  is_help "${1:-}" && { help_prs; return 0; }
+  need_deps || return 1
+  need_owner || return 1
+  APPLY=0; YES=0
+  for a in "$@"; do case "$a" in
+    --apply) APPLY=1;; --yes|-y) YES=1;;
+    -*) printf "  ${Y}ignoring unknown option: %s${X}\n" "$a";;
+  esac; done
 
-# ── artifacts (old CI workflow artifacts) — v0.3.0 ────────────────────────
-cmd_artifacts(){ is_help "${1:-}" && { help_artifacts; return 0; }; not_yet artifacts v0.3.0; }
+  printf "\n  ${BD}freki prs${X}  ${DIM}· abandoned open PRs (no activity ≥ %sd)${X}\n\n" "$PR_STALE_DAYS"
+
+  local rows; rows=$(gh search prs --owner "$OWNER" --state open --limit 100 \
+    --json repository,number,title,author,updatedAt --jq '.[] | [.repository.name,(.number|tostring),.title,.author.login,.updatedAt] | @tsv' 2>/dev/null)
+
+  local -a CAND=()  # repo \x1f number \x1f description
+  local now; now=$(date +%s)
+  local n=0 stale=0
+
+  while IFS=$'\t' read -r repo num title author updated; do
+    [ -z "$repo" ] && continue
+    is_exempt "$repo" && continue
+    n=$((n+1))
+    local ts age; ts=$(date -d "$updated" +%s 2>/dev/null); age=$(( (now - ${ts:-$now}) / 86400 ))
+    if [ "$age" -ge "$PR_STALE_DAYS" ]; then
+      printf "  ${C}%-24s${X} ${BD}#%-4s${X} %s ${DIM}(@%s · %sd inactive)${X}\n" "$repo" "$num" "$title" "$author" "$age"
+      CAND+=("$repo"$'\x1f'"$num"$'\x1f'"$repo #$num '$title' (${age}d inactive)"); stale=$((stale+1))
+    else
+      printf "  ${DIM}∙ %-22s${X} ${BD}#%-4s${X} %s ${DIM}(@%s · %sd ago)${X}\n" "$repo" "$num" "$title" "$author" "$age"
+    fi
+  done < <(printf '%s\n' "$rows")
+
+  if [ "$n" -eq 0 ]; then printf "  ${G}✓ nothing open${X}\n\n"; return 0; fi
+
+  if [ "$APPLY" != 1 ]; then
+    printf "\n  ${BD}%d open${X} ${DIM}·${X} ${Y}%d abandoned (≥%sd)${X} ${DIM}· 'freki prs --apply' closes the abandoned ones${X}\n\n" "$n" "$stale" "$PR_STALE_DAYS"
+    return 0
+  fi
+
+  local m=${#CAND[@]}
+  if [ "$m" -eq 0 ]; then printf "\n  ${G}✓ nothing abandoned to close${X}\n\n"; return 0; fi
+
+  printf "\n"
+  if ! confirm "close $m abandoned PR(s)?"; then printf "  ${DIM}aborted — nothing closed.${X}\n\n"; return 0; fi
+  YES=1
+
+  local closed=0 failed=0 c
+  for c in "${CAND[@]}"; do
+    local repo num desc
+    IFS=$'\x1f' read -r repo num desc <<< "$c"
+    do_it "$repo" "pr" "$desc" gh pr close "$num" -R "$OWNER/$repo" \
+      --comment "Closing — no activity in ${PR_STALE_DAYS}+ days. Reopen anytime if this is still relevant. (via freki)" \
+      && closed=$((closed+1)) || failed=$((failed+1))
+  done
+  printf "\n  ${BD}%d closed${X}%s\n\n" "$closed" "$([ "$failed" -gt 0 ] && printf "  ${DIM}·${X} ${R}%d failed${X}" "$failed")"
+}
+
+# ── artifacts (old CI workflow artifacts) ─────────────────────────────────
+cmd_artifacts(){
+  is_help "${1:-}" && { help_artifacts; return 0; }
+  need_deps || return 1
+  need_owner || return 1
+  APPLY=0; YES=0
+  for a in "$@"; do case "$a" in
+    --apply) APPLY=1;; --yes|-y) YES=1;;
+    -*) printf "  ${Y}ignoring unknown option: %s${X}\n" "$a";;
+  esac; done
+
+  printf "\n  ${BD}freki artifacts${X}  ${DIM}· old CI workflow artifacts (age ≥ %sd)${X}\n\n" "$STALE_DAYS"
+
+  local -a CAND=()  # repo \x1f artifact_id \x1f description
+  local now; now=$(date +%s)
+  local n=0 total_bytes=0 stale=0 stale_bytes=0
+
+  while read -r d; do
+    is_exempt "$d" && continue
+    local rows; rows=$(gh api "repos/$OWNER/$d/actions/artifacts" --paginate --jq \
+      '.artifacts[] | select(.expired==false) | [(.id|tostring),.name,(.size_in_bytes|tostring),.created_at] | @tsv' 2>/dev/null)
+    [ -z "$rows" ] && continue
+    local printed=0
+    while IFS=$'\t' read -r id name bytes created; do
+      [ -z "$id" ] && continue
+      n=$((n+1)); total_bytes=$((total_bytes + bytes))
+      local ts age; ts=$(date -d "$created" +%s 2>/dev/null); age=$(( (now - ${ts:-$now}) / 86400 ))
+      [ "$printed" = 0 ] && { printf "  ${BD}%s${X}\n" "$d"; printed=1; }
+      if [ "$age" -ge "$STALE_DAYS" ]; then
+        printf "    ${DIM}∙${X} %s ${Y}(%s, %sd old)${X}\n" "$name" "$(human_size "$bytes")" "$age"
+        CAND+=("$d"$'\x1f'"$id"$'\x1f'"$d artifact '$name' ($(human_size "$bytes"), ${age}d old)"); stale=$((stale+1)); stale_bytes=$((stale_bytes + bytes))
+      else
+        printf "    ${DIM}∙${X} %s ${DIM}(%s, %sd old)${X}\n" "$name" "$(human_size "$bytes")" "$age"
+      fi
+    done < <(printf '%s\n' "$rows")
+  done < <(repos)
+
+  if [ "$n" -eq 0 ]; then printf "  ${G}✓ no artifacts anywhere${X}\n\n"; return 0; fi
+
+  if [ "$APPLY" != 1 ]; then
+    printf "\n  ${BD}%d artifact(s)${X} ${DIM}(%s)${X} ${DIM}·${X} ${Y}%d past %sd${X} ${DIM}(%s)${X} ${DIM}· 'freki artifacts --apply' deletes those${X}\n\n" \
+      "$n" "$(human_size "$total_bytes")" "$stale" "$STALE_DAYS" "$(human_size "$stale_bytes")"
+    return 0
+  fi
+
+  local m=${#CAND[@]}
+  if [ "$m" -eq 0 ]; then printf "\n  ${G}✓ nothing past the threshold${X}\n\n"; return 0; fi
+
+  printf "\n"
+  if ! confirm "delete $m artifact(s) ($(human_size "$stale_bytes"))?"; then printf "  ${DIM}aborted — nothing deleted.${X}\n\n"; return 0; fi
+  YES=1
+
+  local deleted=0 failed=0 c
+  for c in "${CAND[@]}"; do
+    local repo id desc
+    IFS=$'\x1f' read -r repo id desc <<< "$c"
+    do_it "$repo" "artifact" "$desc" gh api -X DELETE "repos/$OWNER/$repo/actions/artifacts/$id" \
+      && deleted=$((deleted+1)) || failed=$((failed+1))
+  done
+  printf "\n  ${BD}%d deleted${X}%s\n\n" "$deleted" "$([ "$failed" -gt 0 ] && printf "  ${DIM}·${X} ${R}%d failed${X}" "$failed")"
+}
 
 # ── releases (stale draft / pre-releases) — v0.4.0 ────────────────────────
 cmd_releases(){ is_help "${1:-}" && { help_releases; return 0; }; not_yet releases v0.4.0; }
@@ -188,16 +303,26 @@ help_branches(){
   printf "    --yes     skip the confirmation prompt\n\n"
 }
 help_prs(){
-  printf "\n  ${BD}freki prs${X} [--apply] [--yes] [--days N]\n\n"
-  printf "  Open pull requests with no activity in N months ${DIM}(default: %s days)${X}. Lists them;\n" "$PR_STALE_DAYS"
-  printf "  ${BD}--apply${X} closes them with a courteous comment. Never touches PRs with recent activity.\n\n"
-  printf "  ${DIM}not built yet — landing in v0.3.0.${X}\n\n"
+  printf "\n  ${BD}freki prs${X} [--apply] [--yes]\n\n"
+  printf "  Open pull requests across the estate with no activity in \$FREKI_PR_STALE_DAYS\n"
+  printf "  ${DIM}(default: %s days)${X}. Lists every open PR, marking the abandoned ones; ${BD}--apply${X}\n" "$PR_STALE_DAYS"
+  printf "  closes those with a courteous comment. Never touches PRs with recent activity.\n"
+  printf "  Excludes exempt repos (\$HUGINN_FAMILY + exemptions.json). ${DIM}Network — one search query\n"
+  printf "  plus one 'gh pr close' per abandoned PR on --apply.${X}\n\n"
+  printf "  ${BD}Options${X}\n"
+  printf "    --apply   close the abandoned PRs (confirms once for the batch)\n"
+  printf "    --yes     skip the confirmation prompt\n\n"
 }
 help_artifacts(){
   printf "\n  ${BD}freki artifacts${X} [--apply] [--yes]\n\n"
-  printf "  Old GitHub Actions workflow artifacts ${DIM}(they silently consume the storage quota)${X}.\n"
-  printf "  Lists by age/size; ${BD}--apply${X} deletes those past a threshold.\n\n"
-  printf "  ${DIM}not built yet — landing in v0.3.0.${X}\n\n"
+  printf "  Old GitHub Actions workflow artifacts ${DIM}(they silently consume the storage quota)${X},\n"
+  printf "  age ≥ \$FREKI_STALE_DAYS ${DIM}(default: %s days)${X}, excluding already-expired ones (GitHub\n" "$STALE_DAYS"
+  printf "  reclaims those itself). Lists by age/size; ${BD}--apply${X} deletes those past the threshold.\n"
+  printf "  Excludes exempt repos (\$HUGINN_FAMILY + exemptions.json). ${DIM}Network — one API call per\n"
+  printf "  repo to list, one per artifact deleted on --apply.${X}\n\n"
+  printf "  ${BD}Options${X}\n"
+  printf "    --apply   delete the artifacts past the threshold (confirms once for the batch)\n"
+  printf "    --yes     skip the confirmation prompt\n\n"
 }
 help_releases(){
   printf "\n  ${BD}freki releases${X} [--apply] [--yes]\n\n"
@@ -217,8 +342,8 @@ cmd_help(){
   printf "\n  ${BD}freki${X} ${DIM}— the estate's reaper · %s${X}\n\n" "$ROOT"
   printf "  ${DIM}reap${X}\n"
   printf "    ${BD}branches${X} [--apply]    merged/stale branches, estate-wide\n"
-  printf "    ${BD}prs${X} [--apply]         abandoned open PRs                 ${DIM}(v0.3.0)${X}\n"
-  printf "    ${BD}artifacts${X} [--apply]   old CI workflow artifacts          ${DIM}(v0.3.0)${X}\n"
+  printf "    ${BD}prs${X} [--apply]         abandoned open PRs\n"
+  printf "    ${BD}artifacts${X} [--apply]   old CI workflow artifacts\n"
   printf "    ${BD}releases${X} [--apply]    stale draft / pre-releases         ${DIM}(v0.4.0)${X}\n"
   printf "    ${BD}reap${X}                  the combined cruft summary         ${DIM}(v0.4.0)${X}\n"
   printf "  ${DIM}reference${X}\n"
