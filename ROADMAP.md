@@ -10,7 +10,7 @@ _What's planned for freki — check items off as they ship. Each phase is a vers
 - [x] **v0.3.0 — `prs` + `artifacts`.** Abandoned PRs; old CI artifacts.
 - [x] **v0.4.0 — `releases` + `reap`.** Stale drafts/pre-releases; the combined summary.
 - [x] **v0.5.0 — CI & docs.** `shellcheck` gate; consolidated README with the safety contract up front.
-- [ ] **v1.0.0 — Release.** Symlink install to `~/.local/bin/freki`, tagged `v1.0.0`, Definition of
+- [x] **v1.0.0 — Release.** Symlink install to `~/.local/bin/freki`, tagged `v1.0.0`, Definition of
       Done met.
 
 ## Deferred (do NOT build before v1.0)
