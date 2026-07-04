@@ -1,0 +1,4 @@
+{
+  "note": "Repos freki skips — not code projects, or managed elsewhere. freki merges this with the HUGINN_FAMILY env var and skips these in branches/prs/artifacts/releases/reap. This bundled default is empty; put your estate's real list in repo-conventions/exemptions.json (pointed to by HUGINN_CONVENTIONS), shared with huginn.",
+  "exempt": []
+}

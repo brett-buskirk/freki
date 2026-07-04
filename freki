@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+# freki — the estate's reaper. Finds and clears GitHub cruft across $FREKI_ROOT (default ~/github-repos).
+# Odin's wolf: the one with teeth. Dry-run by default — nothing is deleted without --apply.
+#
+#   freki branches | prs | artifacts | releases | reap
+#   run 'freki help' for the menu, or 'freki <command> help' for per-command detail.
+set -uo pipefail
+SELF="$(readlink -f "$0" 2>/dev/null || echo "$0")"; HERE="$(cd "$(dirname "$SELF")" && pwd)"
+# ── configuration — env  >  config file  >  smart defaults ────────────────
+CONFIG="${FREKI_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/freki/config}"
+for _v in ROOT OWNER STALE_DAYS PR_STALE_DAYS CONVENTIONS; do eval "_env_$_v=\${FREKI_$_v-}"; done
+[ -f "$CONFIG" ] && . "$CONFIG"
+
+# free config for huginn users — if FREKI_* is unset, fall back to huginn's config
+HCONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/huginn/config"
+[ -f "$HCONFIG" ] && . "$HCONFIG"
+
+ROOT="${_env_ROOT:-${FREKI_ROOT:-${HUGINN_ROOT:-$HOME/github-repos}}}"
+OWNER="${_env_OWNER:-${FREKI_OWNER:-${HUGINN_OWNER:-}}}"                 # resolved lazily — see need_owner
+STALE_DAYS="${_env_STALE_DAYS:-${FREKI_STALE_DAYS:-90}}"                 # branches: days since last commit to count as stale
+PR_STALE_DAYS="${_env_PR_STALE_DAYS:-${FREKI_PR_STALE_DAYS:-180}}"       # prs: days with no activity to count as abandoned
+FAMILY="${HUGINN_FAMILY:-}"                                              # space-separated repos to exclude — shared with huginn
+CONV="$ROOT/${_env_CONVENTIONS:-${FREKI_CONVENTIONS:-${HUGINN_CONVENTIONS:-repo-conventions}}}"
+
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+  R=$'\e[31m'; G=$'\e[32m'; Y=$'\e[33m'; C=$'\e[36m'; M=$'\e[35m'; DIM=$'\e[2m'; BD=$'\e[1m'; X=$'\e[0m'
+else R=; G=; Y=; C=; M=; DIM=; BD=; X=; fi
+
+is_exempt(){ case " $FAMILY $CONV_EXEMPT " in *" $1 "*) return 0;; *) return 1;; esac; }  # HUGINN_FAMILY env + conventions exemptions.json
+is_help(){ case "${1:-}" in help|-h|--help) return 0;; *) return 1;; esac; }
+repos(){ (cd "$ROOT" && for d in */; do [ -d "${d}.git" ] && echo "${d%/}"; done | sort); }
+need_owner(){ [ -n "$OWNER" ] && return 0; OWNER="$(gh api user --jq .login 2>/dev/null)"; [ -n "$OWNER" ] && return 0; printf "  ${R}no GitHub owner set.${X} Set FREKI_OWNER (or HUGINN_OWNER), or add it to %s.\n" "$CONFIG" >&2; return 1; }
+first_of(){ local f; for f in "$@"; do [ -e "$f" ] && { printf '%s' "$f"; return 0; }; done; return 1; }  # your conventions repo, else bundled templates
+need_deps(){ local d; local -a miss=(); for d in git gh jq; do command -v "$d" >/dev/null 2>&1 || miss+=("$d"); done; [ ${#miss[@]} -eq 0 ] && return 0; printf "  ${R}missing required tool(s): %s${X} ${DIM}(freki needs bash, git, gh, jq)${X}\n" "${miss[*]}" >&2; return 1; }
+
+# exempt repos from the conventions data (merged with HUGINN_FAMILY by is_exempt)
+CONV_EXEMPT=""
+if command -v jq >/dev/null 2>&1; then
+  _ej="$(first_of "$CONV/exemptions.json" "$HERE/templates/exemptions.json")"
+  [ -n "$_ej" ] && CONV_EXEMPT="$(jq -r '.exempt[].repo' "$_ej" 2>/dev/null | tr '\n' ' ')"
+else
+  printf "  ${Y}jq not found — exemptions.json won't be honored this run, only \$HUGINN_FAMILY.${X}\n" >&2
+fi
+
+# ── safety spine — dry-run / --apply / confirm ────────────────────────────
+# Every command that deletes something routes through here. Dry-run is the
+# default: would() reports, do_it() only mutates when the command's own
+# `--apply` flag set APPLY=1. Confirms interactively unless `--yes` set YES=1.
+APPLY=0; YES=0
+LOGFILE="${XDG_STATE_HOME:-$HOME/.local/state}/freki/reaped.log"
+
+would(){ printf "  ${DIM}[dry-run] would %s${X}\n" "$1"; }  # $1 = description of the action
+
+confirm(){  # $1 = prompt; 0 = go, 1 = abort. Reads /dev/tty so piped stdin can't silently skip it.
+  [ "$YES" = 1 ] && return 0
+  if [ ! -r /dev/tty ]; then printf "  ${Y}no tty for confirmation — pass --yes to proceed non-interactively.${X}\n" >&2; return 1; fi
+  local reply; printf "  ${Y}%s${X} ${DIM}[y/N]${X} " "$1" > /dev/tty; read -r reply < /dev/tty
+  case "$reply" in y|Y|yes|YES) return 0;; *) return 1;; esac
+}
+
+log_action(){ mkdir -p "$(dirname "$LOGFILE")"; printf '%s\t%s\t%s\t%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$1" "$2" "$3" >> "$LOGFILE"; }  # repo, kind, detail
+
+do_it(){  # $1=repo $2=kind $3=description $4..=the actual delete command
+  local repo="$1" kind="$2" desc="$3"; shift 3
+  if [ "$APPLY" != 1 ]; then would "$desc"; return 0; fi
+  if ! confirm "delete $desc?"; then printf "  ${DIM}∙ skipped${X} %s\n" "$desc"; return 1; fi
+  if "$@"; then printf "  ${G}✓ deleted${X} %s\n" "$desc"; log_action "$repo" "$kind" "$desc"; return 0
+  else printf "  ${R}✗ failed${X} %s\n" "$desc"; return 1; fi
+}
+
+not_yet(){ printf "\n  ${BD}freki %s${X}\n\n  ${DIM}not built yet — landing in %s. see ROADMAP.md for the phased plan.${X}\n\n" "$1" "$2"; }
+
+# ── branches (merged / stale — estate-wide) — v0.2.0 ──────────────────────
+cmd_branches(){ is_help "${1:-}" && { help_branches; return 0; }; not_yet branches v0.2.0; }
+
+# ── prs (abandoned open PRs) — v0.3.0 ─────────────────────────────────────
+cmd_prs(){ is_help "${1:-}" && { help_prs; return 0; }; not_yet prs v0.3.0; }
+
+# ── artifacts (old CI workflow artifacts) — v0.3.0 ────────────────────────
+cmd_artifacts(){ is_help "${1:-}" && { help_artifacts; return 0; }; not_yet artifacts v0.3.0; }
+
+# ── releases (stale draft / pre-releases) — v0.4.0 ────────────────────────
+cmd_releases(){ is_help "${1:-}" && { help_releases; return 0; }; not_yet releases v0.4.0; }
+
+# ── reap (the combined cruft summary) — v0.4.0 ────────────────────────────
+cmd_reap(){ is_help "${1:-}" && { help_reap; return 0; }; not_yet reap v0.4.0; }
+
+# ── per-command help ──────────────────────────────────────────────────────
+help_branches(){
+  printf "\n  ${BD}freki branches${X} [--apply] [--yes] [--force]\n\n"
+  printf "  Merged and long-stale local + remote branches across the estate ${DIM}(extends huginn's\n"
+  printf "  'branches --prune' to remote and estate-wide)${X}. Lists candidates; ${BD}--apply${X} deletes.\n"
+  printf "  ${BD}Never${X} the default/protected branch; ${BD}never${X} an unmerged branch unless ${BD}--force${X}\n"
+  printf "  (and even then, confirms). Excludes exempt repos (\$HUGINN_FAMILY + exemptions.json).\n\n"
+  printf "  ${DIM}not built yet — landing in v0.2.0.${X}\n\n"
+}
+help_prs(){
+  printf "\n  ${BD}freki prs${X} [--apply] [--yes] [--days N]\n\n"
+  printf "  Open pull requests with no activity in N months ${DIM}(default: %s days)${X}. Lists them;\n" "$PR_STALE_DAYS"
+  printf "  ${BD}--apply${X} closes them with a courteous comment. Never touches PRs with recent activity.\n\n"
+  printf "  ${DIM}not built yet — landing in v0.3.0.${X}\n\n"
+}
+help_artifacts(){
+  printf "\n  ${BD}freki artifacts${X} [--apply] [--yes]\n\n"
+  printf "  Old GitHub Actions workflow artifacts ${DIM}(they silently consume the storage quota)${X}.\n"
+  printf "  Lists by age/size; ${BD}--apply${X} deletes those past a threshold.\n\n"
+  printf "  ${DIM}not built yet — landing in v0.3.0.${X}\n\n"
+}
+help_releases(){
+  printf "\n  ${BD}freki releases${X} [--apply] [--yes]\n\n"
+  printf "  Stale draft releases and old pre-releases. Lists them; ${BD}--apply${X} deletes.\n"
+  printf "  ${BD}Never${X} a published release or its tag.\n\n"
+  printf "  ${DIM}not built yet — landing in v0.4.0.${X}\n\n"
+}
+help_reap(){
+  printf "\n  ${BD}freki reap${X}\n\n"
+  printf "  The combined \"here's all the cruft\" summary across branches/prs/artifacts/releases,\n"
+  printf "  with an estate headline. Dry-run only — apply per-command.\n\n"
+  printf "  ${DIM}not built yet — landing in v0.4.0.${X}\n\n"
+}
+
+# ── help ──────────────────────────────────────────────────────────────────
+cmd_help(){
+  printf "\n  ${BD}freki${X} ${DIM}— the estate's reaper · %s${X}\n\n" "$ROOT"
+  printf "  ${DIM}reap${X}\n"
+  printf "    ${BD}branches${X} [--apply]    merged/stale branches, estate-wide  ${DIM}(v0.2.0)${X}\n"
+  printf "    ${BD}prs${X} [--apply]         abandoned open PRs                 ${DIM}(v0.3.0)${X}\n"
+  printf "    ${BD}artifacts${X} [--apply]   old CI workflow artifacts          ${DIM}(v0.3.0)${X}\n"
+  printf "    ${BD}releases${X} [--apply]    stale draft / pre-releases         ${DIM}(v0.4.0)${X}\n"
+  printf "    ${BD}reap${X}                  the combined cruft summary         ${DIM}(v0.4.0)${X}\n"
+  printf "  ${DIM}reference${X}\n"
+  printf "    ${BD}help${X}                  this menu\n\n"
+  printf "  ${DIM}dry-run by default — every command needs${X} ${BD}--apply${X} ${DIM}to actually delete anything.${X}\n"
+  printf "  ${DIM}run${X} ${BD}freki <command> help${X} ${DIM}for details & options on any command.${X}\n\n"
+}
+
+case "${1:-help}" in
+  branches|br)   shift; cmd_branches "$@";;
+  prs)           shift; cmd_prs "$@";;
+  artifacts|art) shift; cmd_artifacts "$@";;
+  releases|rel)  shift; cmd_releases "$@";;
+  reap)          shift; cmd_reap "$@";;
+  help|-h|--help) cmd_help;;
+  *) printf "${R}unknown command: %s${X}\n" "$1"; cmd_help; exit 1;;
+esac
