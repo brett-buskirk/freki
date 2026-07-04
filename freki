@@ -70,8 +70,94 @@ do_it(){  # $1=repo $2=kind $3=description $4..=the actual delete command
 
 not_yet(){ printf "\n  ${BD}freki %s${X}\n\n  ${DIM}not built yet — landing in %s. see ROADMAP.md for the phased plan.${X}\n\n" "$1" "$2"; }
 
-# ── branches (merged / stale — estate-wide) — v0.2.0 ──────────────────────
-cmd_branches(){ is_help "${1:-}" && { help_branches; return 0; }; not_yet branches v0.2.0; }
+# ── branches (merged / stale — estate-wide) ───────────────────────────────
+cmd_branches(){
+  is_help "${1:-}" && { help_branches; return 0; }
+  need_deps || return 1
+  APPLY=0; YES=0; local FORCE=0
+  for a in "$@"; do case "$a" in
+    --apply) APPLY=1;; --yes|-y) YES=1;; --force) FORCE=1;;
+    -*) printf "  ${Y}ignoring unknown option: %s${X}\n" "$a";;
+  esac; done
+
+  printf "\n  ${BD}freki branches${X}  ${DIM}· merged/stale branches, estate-wide (stale ≥ %sd)${X}\n\n" "$STALE_DAYS"
+
+  local -a CAND=()  # repo \x1f scope \x1f ref \x1f description — scope: local|localforce|remote|remoteforce
+  local now; now=$(date +%s)
+  local repos_flagged=0
+
+  while read -r d; do
+    is_exempt "$d" && continue
+    local GD="$ROOT/$d"
+    git -C "$GD" fetch -q --prune origin >/dev/null 2>&1
+    local def cur mergedset printed=0 flagged=0
+    def=$(git -C "$GD" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##'); def=${def:-main}
+    cur=$(git -C "$GD" symbolic-ref --short HEAD 2>/dev/null)
+    mergedset=$(git -C "$GD" for-each-ref --format='%(refname:short)' --merged "origin/$def" refs/heads refs/remotes/origin 2>/dev/null)
+
+    while read -r b; do
+      [ -z "$b" ] && continue; [ "$b" = "$def" ] && continue; [ "$b" = "$cur" ] && continue
+      local ts age; ts=$(git -C "$GD" log -1 --format=%ct "$b" 2>/dev/null); age=$(( (now - ${ts:-$now}) / 86400 ))
+      [ "$printed" = 0 ] && { printf "  ${BD}%s${X} ${DIM}(default: %s)${X}\n" "$d" "$def"; printed=1; }
+      if grep -qx "$b" <<<"$mergedset"; then
+        printf "    ${DIM}∙${X} %s ${G}(merged, %sd)${X}\n" "$b" "$age"
+        CAND+=("$d"$'\x1f'"local"$'\x1f'"$b"$'\x1f'"$d local branch '$b' (merged, ${age}d)"); flagged=1
+      elif [ "$age" -ge "$STALE_DAYS" ]; then
+        if [ "$FORCE" = 1 ]; then
+          printf "    ${DIM}∙${X} %s ${Y}(unmerged, stale %sd — force)${X}\n" "$b" "$age"
+          CAND+=("$d"$'\x1f'"localforce"$'\x1f'"$b"$'\x1f'"$d local branch '$b' (UNMERGED, stale ${age}d, forced)"); flagged=1
+        else printf "    ${DIM}∙${X} %s ${Y}(unmerged, stale %sd — needs --force)${X}\n" "$b" "$age"; fi
+      else printf "    ${DIM}∙${X} %s ${DIM}(unmerged, active)${X}\n" "$b"; fi
+    done < <(git -C "$GD" for-each-ref --format='%(refname:short)' refs/heads 2>/dev/null)
+
+    while read -r rb; do
+      [ -z "$rb" ] && continue
+      local b="${rb#origin/}"
+      [ "$b" = "$def" ] && continue; [ "$b" = "HEAD" ] && continue
+      local ts age; ts=$(git -C "$GD" log -1 --format=%ct "$rb" 2>/dev/null); age=$(( (now - ${ts:-$now}) / 86400 ))
+      [ "$printed" = 0 ] && { printf "  ${BD}%s${X} ${DIM}(default: %s)${X}\n" "$d" "$def"; printed=1; }
+      if grep -qx "$rb" <<<"$mergedset"; then
+        printf "    ${DIM}∙${X} origin/%s ${G}(merged, %sd)${X}\n" "$b" "$age"
+        CAND+=("$d"$'\x1f'"remote"$'\x1f'"$b"$'\x1f'"$d remote branch 'origin/$b' (merged, ${age}d)"); flagged=1
+      elif [ "$age" -ge "$STALE_DAYS" ]; then
+        if [ "$FORCE" = 1 ]; then
+          printf "    ${DIM}∙${X} origin/%s ${Y}(unmerged, stale %sd — force)${X}\n" "$b" "$age"
+          CAND+=("$d"$'\x1f'"remoteforce"$'\x1f'"$b"$'\x1f'"$d remote branch 'origin/$b' (UNMERGED, stale ${age}d, forced)"); flagged=1
+        else printf "    ${DIM}∙${X} origin/%s ${Y}(unmerged, stale %sd — needs --force)${X}\n" "$b" "$age"; fi
+      else printf "    ${DIM}∙${X} origin/%s ${DIM}(unmerged, active)${X}\n" "$b"; fi
+    done < <(git -C "$GD" for-each-ref --format='%(refname:short)' refs/remotes/origin 2>/dev/null)
+
+    [ "$flagged" = 1 ] && repos_flagged=$((repos_flagged+1))
+  done < <(repos)
+
+  local n=${#CAND[@]}
+  if [ "$n" -eq 0 ]; then printf "  ${G}✓ no merged or stale branches anywhere${X}\n\n"; return 0; fi
+
+  if [ "$APPLY" != 1 ]; then
+    printf "\n  ${DIM}%d branch(es) across %d repo(s) · 'freki branches --apply' deletes the merged ones (add --force for stale-unmerged)${X}\n\n" "$n" "$repos_flagged"
+    return 0
+  fi
+
+  printf "\n"
+  if ! confirm "delete $n branch(es) across $repos_flagged repo(s)?"; then
+    printf "  ${DIM}aborted — nothing deleted.${X}\n\n"; return 0
+  fi
+  YES=1  # confirmed as a batch — do_it's own per-item confirm becomes a no-op below
+
+  local deleted=0 failed=0 c
+  for c in "${CAND[@]}"; do
+    local repo scope ref desc kind
+    IFS=$'\x1f' read -r repo scope ref desc <<< "$c"
+    local GD="$ROOT/$repo"
+    case "$scope" in local|localforce) kind="local-branch";; *) kind="remote-branch";; esac
+    case "$scope" in
+      local)      do_it "$repo" "$kind" "$desc" git -C "$GD" branch -d "$ref" && deleted=$((deleted+1)) || failed=$((failed+1));;
+      localforce) do_it "$repo" "$kind" "$desc" git -C "$GD" branch -D "$ref" && deleted=$((deleted+1)) || failed=$((failed+1));;
+      *)          do_it "$repo" "$kind" "$desc" git -C "$GD" push origin --delete "$ref" && deleted=$((deleted+1)) || failed=$((failed+1));;
+    esac
+  done
+  printf "\n  ${BD}%d deleted${X}%s\n\n" "$deleted" "$([ "$failed" -gt 0 ] && printf "  ${DIM}·${X} ${R}%d failed${X}" "$failed")"
+}
 
 # ── prs (abandoned open PRs) — v0.3.0 ─────────────────────────────────────
 cmd_prs(){ is_help "${1:-}" && { help_prs; return 0; }; not_yet prs v0.3.0; }
@@ -90,9 +176,16 @@ help_branches(){
   printf "\n  ${BD}freki branches${X} [--apply] [--yes] [--force]\n\n"
   printf "  Merged and long-stale local + remote branches across the estate ${DIM}(extends huginn's\n"
   printf "  'branches --prune' to remote and estate-wide)${X}. Lists candidates; ${BD}--apply${X} deletes.\n"
-  printf "  ${BD}Never${X} the default/protected branch; ${BD}never${X} an unmerged branch unless ${BD}--force${X}\n"
-  printf "  (and even then, confirms). Excludes exempt repos (\$HUGINN_FAMILY + exemptions.json).\n\n"
-  printf "  ${DIM}not built yet — landing in v0.2.0.${X}\n\n"
+  printf "  ${BD}Never${X} the default branch or the currently checked-out branch; ${BD}never${X} an\n"
+  printf "  unmerged branch unless ${BD}--force${X} — and even then, confirms once for the whole batch\n"
+  printf "  before deleting anything (skip the prompt with ${BD}--yes${X}). Excludes exempt repos\n"
+  printf "  (\$HUGINN_FAMILY + exemptions.json). ${DIM}Stale threshold: \$FREKI_STALE_DAYS (default %s days).\n" "$STALE_DAYS"
+  printf "  Network — fetches each repo's remote before checking merge status, and --apply on a\n"
+  printf "  remote branch pushes a delete to origin.${X}\n\n"
+  printf "  ${BD}Options${X}\n"
+  printf "    --apply   delete merged branches (and stale-unmerged ones if --force is also set)\n"
+  printf "    --force   also make stale, unmerged branches eligible for deletion\n"
+  printf "    --yes     skip the confirmation prompt\n\n"
 }
 help_prs(){
   printf "\n  ${BD}freki prs${X} [--apply] [--yes] [--days N]\n\n"
@@ -123,7 +216,7 @@ help_reap(){
 cmd_help(){
   printf "\n  ${BD}freki${X} ${DIM}— the estate's reaper · %s${X}\n\n" "$ROOT"
   printf "  ${DIM}reap${X}\n"
-  printf "    ${BD}branches${X} [--apply]    merged/stale branches, estate-wide  ${DIM}(v0.2.0)${X}\n"
+  printf "    ${BD}branches${X} [--apply]    merged/stale branches, estate-wide\n"
   printf "    ${BD}prs${X} [--apply]         abandoned open PRs                 ${DIM}(v0.3.0)${X}\n"
   printf "    ${BD}artifacts${X} [--apply]   old CI workflow artifacts          ${DIM}(v0.3.0)${X}\n"
   printf "    ${BD}releases${X} [--apply]    stale draft / pre-releases         ${DIM}(v0.4.0)${X}\n"
