@@ -22,6 +22,7 @@ PR_STALE_DAYS="${_env_PR_STALE_DAYS:-${FREKI_PR_STALE_DAYS:-180}}"       # prs: 
 FAMILY="${HUGINN_FAMILY:-}"                                              # space-separated repos to exclude — shared with huginn
 CONV="$ROOT/${_env_CONVENTIONS:-${FREKI_CONVENTIONS:-${HUGINN_CONVENTIONS:-repo-conventions}}}"
 
+# shellcheck disable=SC2034  # M (magenta) is part of the shared huginn/muninn/freki palette; unused here for now
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
   R=$'\e[31m'; G=$'\e[32m'; Y=$'\e[33m'; C=$'\e[36m'; M=$'\e[35m'; DIM=$'\e[2m'; BD=$'\e[1m'; X=$'\e[0m'
 else R=; G=; Y=; C=; M=; DIM=; BD=; X=; fi
@@ -364,7 +365,7 @@ cmd_reap(){
 
   printf "  ${BD}branches${X}    %d reapable ${DIM}across %d repo(s)${X}\n" "$REAP_BR_N" "$REAP_BR_REPOS"
   printf "  ${BD}prs${X}         %d abandoned ${DIM}(of %d open)${X}\n" "$REAP_PR_STALE" "$REAP_PR_N"
-  printf "  ${BD}artifacts${X}   %d reapable ${DIM}(%s, of %d total)${X}\n" "$REAP_ART_STALE" "$(human_size "$REAP_ART_STALE_BYTES")" "$REAP_ART_N"
+  printf "  ${BD}artifacts${X}   %d reapable ${DIM}(%s of %s across %d total)${X}\n" "$REAP_ART_STALE" "$(human_size "$REAP_ART_STALE_BYTES")" "$(human_size "$REAP_ART_BYTES")" "$REAP_ART_N"
   printf "  ${BD}releases${X}    %d reapable ${DIM}(of %d draft/pre)${X}\n" "$REAP_REL_STALE" "$REAP_REL_N"
 
   local total=$((REAP_BR_N + REAP_PR_STALE + REAP_ART_STALE + REAP_REL_STALE))

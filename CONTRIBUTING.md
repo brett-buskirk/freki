@@ -10,7 +10,10 @@
 `freki` is a single Bash script. Keep it dependency-light: `bash`, `git`, `gh`, `jq` only.
 
 - **Syntax-check before pushing:** `bash -n freki`.
-- **Run `shellcheck`** if you have it: `shellcheck freki`.
+- **Run `shellcheck`** if you have it: `shellcheck freki` (CI runs both `bash -n` and `shellcheck` on
+  every push/PR — see `.github/workflows/shellcheck.yml`). Known-intentional warnings are silenced via
+  `.shellcheckrc` (repo-wide: non-constant `source`, printf-with-color-vars) or an inline
+  `# shellcheck disable=...` comment (one-off, with a reason) — don't broaden either without a reason.
 - Colors go through the `$R/$G/$Y/…` vars (empty when non-TTY / `NO_COLOR`) — don't hardcode escapes.
 - Each subcommand is a `cmd_<name>` function with a matching `help_<name>`; wire new ones into the
   `case` dispatcher and the `cmd_help` menu.

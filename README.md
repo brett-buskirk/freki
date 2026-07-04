@@ -14,7 +14,24 @@ and abandoned branches, dead PRs, old artifacts, stale releases — across the w
 > **Freki is the one tool in the pack that deletes things — so it's the most dangerous, and it
 > defaults to safe.** Every command is **dry-run by default**: it lists exactly what it *would*
 > remove and stops. Nothing is deleted until you pass `--apply`, and destructive `--apply` runs still
-> confirm before touching anything, unless you also pass `--yes`. See [Safety](#safety) below.
+> confirm before touching anything, unless you also pass `--yes`.
+
+## Safety
+
+These rules are non-negotiable, and they're enforced in code, not just documentation:
+
+- **Dry-run is the default.** Every command prints what it *would* do and exits without mutating.
+  `--apply` is required to delete anything.
+- **Confirms before deleting**, even with `--apply` — unless you also pass `--yes`. The confirmation
+  prompt reads from `/dev/tty`, so a piped or scripted stdin can't accidentally skip it.
+- **Never touches:** the default/protected branch · unmerged branches (without explicit `--force`,
+  and even then it confirms) · published releases and their tags · anything with recent activity.
+- **Respects exemptions** — repos in `repo-conventions/exemptions.json` (shared with huginn) or
+  listed in `$HUGINN_FAMILY` are skipped entirely, everywhere.
+- **Logs every deletion** it actually makes to `~/.local/state/freki/reaped.log` (repo, kind, detail,
+  UTC timestamp) so an `--apply` run is auditable after the fact.
+- **GitHub-only, for now.** No cloud-resource deletion (droplets, buckets, volumes) — that's a
+  deferred phase with its own auth and safety model. See [ROADMAP.md](ROADMAP.md).
 
 ## Status
 
@@ -72,23 +89,6 @@ All reaping commands exclude exempt repos, and a destructive `--apply` run confi
 whole batch before doing anything (skip the prompt with `--yes`).
 
 Run **`freki <command> help`** for details and options on any command.
-
-## Safety
-
-These rules are non-negotiable, and they're enforced in code, not just documentation:
-
-- **Dry-run is the default.** Every command prints what it *would* do and exits without mutating.
-  `--apply` is required to delete anything.
-- **Confirms before deleting**, even with `--apply` — unless you also pass `--yes`. The confirmation
-  prompt reads from `/dev/tty`, so a piped or scripted stdin can't accidentally skip it.
-- **Never touches:** the default/protected branch · unmerged branches (without explicit `--force`,
-  and even then it confirms) · published releases and their tags · anything with recent activity.
-- **Respects exemptions** — repos in `repo-conventions/exemptions.json` (shared with huginn) or
-  listed in `$HUGINN_FAMILY` are skipped entirely, everywhere.
-- **Logs every deletion** it actually makes to `~/.local/state/freki/reaped.log` (repo, kind, detail,
-  UTC timestamp) so an `--apply` run is auditable after the fact.
-- **GitHub-only in v0.1.** No cloud-resource deletion (droplets, buckets, volumes) yet — that's a
-  deferred phase with its own auth and safety model. See [ROADMAP.md](ROADMAP.md).
 
 ## How it works
 
