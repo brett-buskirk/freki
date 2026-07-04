@@ -6,5 +6,30 @@ All notable changes to freki are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-07-04
+
+First cut — the scaffold and safety spine, before any reaping command exists.
+
 ### Added
-- Initial scaffold.
+- **Dispatcher + two-level help** — `freki help` (top-level menu) and `freki <command> help`
+  (per-command detail), mirroring huginn's structure and voice.
+- **Config-driven** — settings resolve env → config file → smart defaults: `FREKI_ROOT`,
+  `FREKI_OWNER`, `FREKI_STALE_DAYS`, `FREKI_PR_STALE_DAYS`, `FREKI_CONVENTIONS`. Config lives at
+  `~/.config/freki/config`. Falls back to `~/.config/huginn/config`'s `HUGINN_ROOT`/`HUGINN_OWNER`/
+  `HUGINN_CONVENTIONS` when unset, so a huginn user gets a working freki with zero setup (same
+  pattern as muninn).
+- **Estate model** — repos are any top-level directory under `$FREKI_ROOT` with a `.git` folder,
+  identical to huginn's `repos()`.
+- **Exemptions** — reuses huginn's `is_exempt`: repos listed in `repo-conventions/exemptions.json`
+  or the `$HUGINN_FAMILY` env var are skipped by every command. Ships a bundled, empty
+  `templates/exemptions.json` fallback so the tool degrades safely with no conventions repo present.
+- **The shared dry-run/`--apply`/confirm safety spine** — `would()`, `confirm()`, `do_it()`, and
+  `log_action()`. Dry-run is the default for every command; `--apply` is required to mutate, and a
+  destructive `--apply` run still confirms (reading from `/dev/tty`, so piped stdin can't skip it)
+  unless `--yes` is also passed. Every deletion made with `--apply` is logged to
+  `~/.local/state/freki/reaped.log` (repo, kind, detail, UTC timestamp) for after-the-fact audit.
+- **Dependency check** — `need_deps` verifies `git`/`gh`/`jq` are on `PATH` before a command runs;
+  a missing `jq` at startup degrades exemptions to `$HUGINN_FAMILY`-only with a loud warning, rather
+  than silently narrowing what's protected.
+- Command stubs for `branches`, `prs`, `artifacts`, `releases`, and `reap` — each documents its
+  planned contract via `help_<name>` and reports "not built yet" until its milestone lands.
