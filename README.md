@@ -18,10 +18,10 @@ and abandoned branches, dead PRs, old artifacts, stale releases — across the w
 
 ## Status
 
-**v0.1.0 — scaffold only.** The dispatcher, config, estate model, exemptions, and the shared
-dry-run/`--apply`/confirm safety spine are in place, but none of the reaping commands are wired up
-yet — `branches`, `prs`, `artifacts`, `releases`, and `reap` all currently print a "not built yet"
-notice pointing here. See [ROADMAP.md](ROADMAP.md) for the phased build-out.
+**v0.2.0 — `branches` is live.** The dispatcher, config, estate model, exemptions, and the shared
+dry-run/`--apply`/confirm safety spine are in place, and `branches` reaps merged and stale branches,
+local + remote, across the whole estate. `prs`, `artifacts`, `releases`, and `reap` still print a
+"not built yet" notice pointing here. See [ROADMAP.md](ROADMAP.md) for the phased build-out.
 
 ## Install
 
@@ -40,7 +40,7 @@ manages. If you already run `huginn`, freki picks up its config automatically (s
 
 ```
 reap
-  branches [--apply]    merged/stale branches, estate-wide           (v0.2.0)
+  branches [--apply]    merged/stale branches, estate-wide
   prs [--apply]         abandoned open PRs                           (v0.3.0)
   artifacts [--apply]   old CI workflow artifacts                    (v0.3.0)
   releases [--apply]    stale draft / pre-releases                   (v0.4.0)
@@ -48,6 +48,11 @@ reap
 reference
   help                  this menu
 ```
+
+`branches` lists every merged or long-stale local + remote branch across the estate. Merged branches
+are always eligible for `--apply`; stale-but-unmerged branches need `--force` too. It never touches
+the default branch, the currently checked-out branch, or an unmerged/active branch. A destructive
+`--apply` run confirms once for the whole batch before deleting anything (skip with `--yes`).
 
 Run **`freki <command> help`** for details and options on any command (works today, even before a
 command is built — it documents the planned contract).

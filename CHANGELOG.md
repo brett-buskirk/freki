@@ -6,6 +6,16 @@ All notable changes to freki are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-04
+
+### Added
+- **`branches`** — merged and long-stale local + remote branches across the estate, extending
+  huginn's `branches --prune` to remote refs and the whole estate. Merged branches are always
+  eligible for `--apply`; stale-but-unmerged branches also need `--force`. Never touches the default
+  branch or the currently checked-out branch. A destructive `--apply` run confirms once for the
+  whole batch (skip with `--yes`), and every deletion routes through the safety spine's
+  `do_it`/`log_action` for an auditable record.
+
 ## [0.1.0] - 2026-07-04
 
 First cut — the scaffold and safety spine, before any reaping command exists.
