@@ -6,6 +6,18 @@ All notable changes to freki are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-04
+
+### Added
+- **`releases`** — stale draft releases and old pre-releases per repo, age ≥ `$FREKI_STALE_DAYS`
+  (default 90 days). `--apply` deletes the release entry via the GitHub API; the underlying git tag,
+  if any, is left alone. Never touches a published (non-draft, non-prerelease) release or its tag.
+- **`reap`** — a dry-run-only combined summary across `branches`/`prs`/`artifacts`/`releases`, with
+  an estate-wide headline (reapable counts per category). Never deletes anything itself — points you
+  at the per-command `--apply`. Reuses each command's own scan (via small additive counters exposed
+  after each command's existing dry-run pass) rather than duplicating the scan logic.
+- All five commands now implemented, matching the original v0.1.0–v0.4.0 phased plan.
+
 ## [0.3.0] - 2026-07-04
 
 ### Added

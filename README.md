@@ -18,11 +18,11 @@ and abandoned branches, dead PRs, old artifacts, stale releases — across the w
 
 ## Status
 
-**v0.3.0 — `branches`, `prs`, and `artifacts` are live.** The dispatcher, config, estate model,
-exemptions, and the shared dry-run/`--apply`/confirm safety spine are in place, and freki reaps
-merged/stale branches, abandoned PRs, and old CI artifacts across the whole estate. `releases` and
-`reap` still print a "not built yet" notice pointing here. See [ROADMAP.md](ROADMAP.md) for the
-phased build-out.
+**v0.4.0 — all five commands are live.** The dispatcher, config, estate model, exemptions, and the
+shared dry-run/`--apply`/confirm safety spine are in place, and freki reaps merged/stale branches,
+abandoned PRs, old CI artifacts, and stale draft/pre-releases across the whole estate — plus `reap`,
+a combined dry-run-only summary across all four. What's left is polish: `shellcheck` in CI and the
+`v1.0.0` release. See [ROADMAP.md](ROADMAP.md) for what's left.
 
 ## Install
 
@@ -44,8 +44,8 @@ reap
   branches [--apply]    merged/stale branches, estate-wide
   prs [--apply]         abandoned open PRs
   artifacts [--apply]   old CI workflow artifacts
-  releases [--apply]    stale draft / pre-releases                   (v0.4.0)
-  reap                  the combined cruft summary                   (v0.4.0)
+  releases [--apply]    stale draft / pre-releases
+  reap                  the combined cruft summary (dry-run only)
 reference
   help                  this menu
 ```
@@ -61,11 +61,17 @@ the default branch, the currently checked-out branch, or an unmerged/active bran
 `$FREKI_STALE_DAYS` (default 90 days). Already-expired artifacts are left alone — GitHub reclaims
 those on its own.
 
-All three exclude exempt repos, and a destructive `--apply` run confirms once for the whole batch
-before doing anything (skip the prompt with `--yes`).
+`releases` lists stale draft releases and old pre-releases (same `$FREKI_STALE_DAYS` threshold);
+`--apply` deletes the release entry (the underlying git tag, if any, is left alone). Never touches a
+published (non-draft, non-prerelease) release or its tag.
 
-Run **`freki <command> help`** for details and options on any command (works today, even before a
-command is built — it documents the planned contract).
+`reap` is a **dry-run-only** combined summary across all four — an estate-wide "here's the cruft"
+headline. It never deletes anything itself; apply per-command.
+
+All reaping commands exclude exempt repos, and a destructive `--apply` run confirms once for the
+whole batch before doing anything (skip the prompt with `--yes`).
+
+Run **`freki <command> help`** for details and options on any command.
 
 ## Safety
 
