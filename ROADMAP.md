@@ -9,7 +9,7 @@ _What's planned for freki — check items off as they ship. Each phase is a vers
 - [x] **v0.2.0 — `branches`.** Merged/stale branches, estate-wide, remote + local.
 - [x] **v0.3.0 — `prs` + `artifacts`.** Abandoned PRs; old CI artifacts.
 - [x] **v0.4.0 — `releases` + `reap`.** Stale drafts/pre-releases; the combined summary.
-- [ ] **v0.5.0 — CI & docs.** `shellcheck` gate; consolidated README with the safety contract up front.
+- [x] **v0.5.0 — CI & docs.** `shellcheck` gate; consolidated README with the safety contract up front.
 - [ ] **v1.0.0 — Release.** Symlink install to `~/.local/bin/freki`, tagged `v1.0.0`, Definition of
       Done met.
 
@@ -24,5 +24,5 @@ _What's planned for freki — check items off as they ship. Each phase is a vers
 
 ## Polish
 
-- [ ] `shellcheck` in CI.
+- [x] `shellcheck` in CI.
 - [ ] Bats tests for the pure-logic helpers (`is_exempt`, `repos`, the safety spine).

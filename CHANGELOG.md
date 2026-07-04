@@ -6,6 +6,22 @@ All notable changes to freki are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-04
+
+### Added
+- **`shellcheck` gate in CI** (`.github/workflows/shellcheck.yml`) — runs `bash -n` then `shellcheck`
+  on every push/PR. `.shellcheckrc` silences the two categories that are intentional across the whole
+  huginn/muninn/freki family (non-constant `source`, printf-with-color-vars); the one-off unused-`$M`
+  palette slot is silenced inline with a reason.
+
+### Changed
+- **README consolidated** — the full Safety section now leads the README (right after the intro),
+  rather than being teased by a blockquote near the top and detailed further down. Reworded the
+  "GitHub-only in v0.1" line, now stale since v0.4.0 shipped, to "GitHub-only, for now."
+- `reap`'s `artifacts` line now reports total estate-wide artifact size alongside the reapable amount
+  (fixes a real unused-variable warning `shellcheck` caught — `REAP_ART_BYTES` was computed but never
+  read).
+
 ## [0.4.0] - 2026-07-04
 
 ### Added

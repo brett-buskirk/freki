@@ -1,0 +1,6 @@
+# SC1090: $CONFIG/$HCONFIG are resolved from env/XDG paths, so shellcheck can't follow the
+#         'source' target — expected across the whole huginn/muninn/freki family.
+# SC2059: color vars ($R/$G/$Y/$C/$M/$DIM/$BD/$X) are deliberately interpolated into printf format
+#         strings so they collapse to "" under NO_COLOR/non-TTY — see CONTRIBUTING.md.
+disable=SC1090
+disable=SC2059
