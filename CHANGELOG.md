@@ -6,6 +6,10 @@ All notable changes to freki are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- **`CHEATSHEET.md`** — a one-page reference to every command, alias, option, and behavior (including
+  the dry-run/`--apply` safety model), linked from the README.
+
 ## [1.0.0] - 2026-07-04
 
 First stable release. No functional changes since 0.5.0 — this marks the estate's reaper as done
