@@ -91,7 +91,9 @@ headline. It never deletes anything itself; apply per-command.
 All reaping commands exclude exempt repos, and a destructive `--apply` run confirms once for the
 whole batch before doing anything (skip the prompt with `--yes`).
 
-Run **`freki <command> help`** for details and options on any command.
+Run **`freki <command> help`** for details and options on any command. For a one-page reference to
+every command, option, and behavior — including the dry-run/`--apply` safety model — see the
+[**cheat sheet**](CHEATSHEET.md).
 
 ## How it works
 
